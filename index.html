@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Defensoría Oficial Civil 6 – Chat</title>
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101a17" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230e9f6e'/%3E%3Ctext x='50' y='68' font-size='56' text-anchor='middle' fill='white' font-family='Arial' font-weight='bold'%3ED%3C/text%3E%3C/svg%3E">
+<!--
+=====================================================================
+ DEFENSORÍA OFICIAL CIVIL 6 – CHAT  (un solo archivo · Firebase Auth + Firestore)
+ ACCESO DE CLIENTES SIN SMS: se usa autenticación anónima y se busca el
+ número ingresado en la colección contacts. Si existe, se entra al chat.
+
+ PASOS PARA PONERLO EN LÍNEA
+ 1. Firebase Console → Configuración del proyecto → Tus apps → App web.
+    Copia el objeto firebaseConfig y pégalo en FIREBASE_CONFIG (en el <script>).
+ 2. Authentication → Método de acceso: activa "Correo/contraseña" y "Anónimo".
+    Configuración → Dominios autorizados: agrega el dominio donde publiques.
+ 3. Firestore Database → crear base de datos → pestaña Reglas → pega las reglas de abajo.
+ 4. Personal: crea cada usuario en Authentication (correo y contraseña) y luego,
+    en Firestore, un documento  staff/<UID del usuario>  con el campo
+    role (string):  "admin"  o  "empleado".
+      admin    → ve todo, crea, EDITA y BORRA contactos (y sus mensajes).
+      empleado → ve y crea contactos y conversa; no edita ni borra.
+    Sin ese documento, la cuenta no tiene acceso de personal.
+ 5. Clientes: el personal los registra (botón ➕) con el teléfono en dígitos y
+    código de país (ej. 5493764123456). El cliente entra escribiendo ese número.
+    No se envía SMS: el acceso se concede si el número existe en contacts.
+    ⚠️ Esto implica que cualquiera que conozca un número registrado puede
+    entrar a ese chat. Es el comportamiento pedido (sin verificación por SMS).
+ 6. Publica este archivo en un hosting HTTPS (por ejemplo Firebase Hosting).
+
+ REGLAS DE FIRESTORE
+ rules_version = '2';
+ service cloud.firestore {
+   match /databases/{database}/documents {
+     function signedIn() { return request.auth != null; }
+     function isStaff() { return signedIn() &&
+       exists(/databases/$(database)/documents/staff/$(request.auth.uid)); }
+     function isAdmin() { return isStaff() &&
+       get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.role == 'admin'; }
+     function validContact() { return
+       request.resource.data.keys().hasOnly(['name','phone','createdAt'])
+       && request.resource.data.name is string
+       && request.resource.data.name.size() > 0
+       && request.resource.data.name.size() <= 80; }
+     match /staff/{uid} {
+       allow read: if signedIn() && request.auth.uid == uid;
+       allow write: if false;
+     }
+     match /contacts/{id} {
+       // El cliente (anónimo) puede leer para comprobar que su número existe.
+       allow read: if isStaff() || signedIn();
+       allow create: if isStaff() && validContact();
+       allow update: if isAdmin() && validContact();
+       allow delete: if isAdmin();
+     }
+     match /messages/{id} {
+       // El cliente (anónimo) puede leer y escribir mensajes del contacto.
+       allow read: if isStaff() || signedIn();
+       allow create: if request.resource.data.keys().hasOnly(['cid','from','text','ts'])
+         && request.resource.data.text is string
+         && request.resource.data.text.size() > 0
+         && request.resource.data.text.size() <= 2000
+         && request.resource.data.ts is int
+         && ((isStaff() && request.resource.data.from == 'staff')
+             || (signedIn() && request.resource.data.from == 'client'))
+         && exists(/databases/$(database)/documents/contacts/$(request.resource.data.cid));
+       allow update: if false;
+       allow delete: if isAdmin();
+     }
+   }
+ }
+=====================================================================
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--bar:#fff;--bg:#e9f0ed;--panel:#fff;--chat:#eef3f0;--out:#d6f5e3;--in:#fff;--txt:#10201a;--sub:#62786f;--line:#e4ece8;--hov:#f3f8f5;--soft:#e3f6ec;--acc:#0e9f6e;--acc2:#0b7a56;--onacc:#fff;--sh:0 1px 2px rgba(16,32,26,.1);color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bar:#111c18;--bg:#070d0b;--panel:#101a17;--chat:#0a1311;--out:#0d5a40;--in:#1a2823;--txt:#e6f1ec;--sub:#8aa399;--line:#1c2a25;--hov:#16231f;--soft:#12372a;--acc:#2bc88a;--acc2:#1ea371;--onacc:#03261b;--sh:0 1px 2px rgba(0,0,0,.4);color-scheme:dark}}
+:root[data-theme="dark"]{--bar:#111c18;--bg:#070d0b;--panel:#101a17;--chat:#0a1311;--out:#0d5a40;--in:#1a2823;--txt:#e6f1ec;--sub:#8aa399;--line:#1c2a25;--hov:#16231f;--soft:#12372a;--acc:#2bc88a;--acc2:#1ea371;--onacc:#03261b;--sh:0 1px 2px rgba(0,0,0,.4);color-scheme:dark}
+*{box-sizing:border-box;scrollbar-width:thin;scrollbar-color:color-mix(in srgb,var(--sub) 35%,transparent) transparent}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--txt);font:14.5px/1.4 "Plus Jakarta Sans",system-ui,"Segoe UI",Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+button,input{font:inherit;color:inherit}
+svg{display:block}
+button:focus-visible,.row:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+#app{height:100%;display:flex;max-width:1480px;margin:0 auto;background:var(--panel)}
+#app:has(>.center){background:var(--bg)}
+@media(min-width:1000px){body{padding:20px}#app{border-radius:24px;overflow:hidden;box-shadow:0 24px 60px -24px rgba(8,40,28,.4)}}
+.center{margin:auto;text-align:center;padding:32px 28px;max-width:400px;width:calc(100% - 32px);display:flex;flex-direction:column;gap:12px;background:var(--panel);border-radius:28px;box-shadow:0 12px 40px -12px rgba(8,40,28,.2)}
+.logo{width:72px;height:72px;margin:0 auto 4px;border-radius:22px;background:var(--soft);display:grid;place-items:center;font-size:34px}
+h1{margin:0;font-size:22px;font-weight:700;letter-spacing:-.02em}
+.sub{color:var(--sub);font-size:13px;margin:0;line-height:1.5}
+.btn{background:var(--acc);color:var(--onacc);border:0;border-radius:14px;padding:13px 20px;font-weight:600;cursor:pointer;transition:filter .15s,transform .1s}
+.btn:hover{filter:brightness(1.07)}.btn:active{transform:scale(.98)}.btn:disabled{opacity:.6;cursor:default}
+.btn.alt{background:transparent;color:var(--acc);box-shadow:inset 0 0 0 1.5px var(--line)}
+.btn.alt:hover{background:var(--hov);filter:none}
+.field{border:1.5px solid var(--line);background:var(--bg);border-radius:14px;padding:12px 14px;width:100%;outline:none;transition:border-color .15s,background-color .15s}
+.field:focus{border-color:var(--acc);background-color:var(--panel)}
+.err{color:#d93636;font-size:13px;min-height:18px;margin:0}
+.ok{color:var(--acc)}
+.side{width:400px;display:flex;flex-direction:column;border-right:1px solid var(--line);min-width:0;background:var(--panel)}
+.main,.single{flex:1;display:flex;flex-direction:column;min-width:0;background:var(--chat)}
+.bar{background:var(--bar);display:flex;align-items:center;gap:12px;padding:12px 16px;min-height:66px;border-bottom:1px solid var(--line)}
+.side .bar{justify-content:space-between;border:0}
+.bar .t{font-weight:700;font-size:16px;letter-spacing:-.01em}
+.bar .s{font-size:12px;color:var(--sub)}
+.tools{display:flex;gap:6px}
+.ib{background:none;border:0;color:var(--sub);cursor:pointer;width:38px;height:38px;border-radius:50%;display:inline-grid;place-items:center;transition:background .15s,color .15s}
+.ib:hover{background:var(--hov);color:var(--txt)}
+.ib.pri,.ib.pri:hover{background:var(--acc);color:var(--onacc)}
+.ib.dng:hover{color:#d93636}
+.back{display:none}
+.av{width:44px;height:44px;border-radius:50%;flex:none;display:grid;place-items:center;color:#fff;font-weight:700;font-size:16px}
+.row .av{width:48px;height:48px}
+.search{padding:2px 16px 12px}
+.search .field{border:0;background:var(--bg) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' fill='none' stroke='%238aa399' stroke-width='2' stroke-linecap='round' viewBox='0 0 24 24'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E") no-repeat 14px center;padding:11px 14px 11px 42px}
+.search .field:focus{box-shadow:0 0 0 2px var(--acc)}
+#list{flex:1;overflow-y:auto;padding:0 8px 12px}
+.row{display:flex;gap:12px;padding:10px 12px;cursor:pointer;align-items:center;border-radius:16px;transition:background .12s}
+.row:hover{background:var(--hov)}.row.on{background:var(--soft)}
+.row .mid{flex:1;min-width:0}
+.row .n{font-weight:600;display:flex;justify-content:space-between;gap:8px}
+.row .n small{color:var(--sub);font-weight:500;font-size:11.5px}
+.row .p{color:var(--sub);font-size:13px;display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:2px}
+.row .p span:first-child{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.badge{background:var(--acc);color:var(--onacc);border-radius:20px;min-width:20px;padding:0 6px;font-size:11.5px;text-align:center;line-height:20px;font-weight:700}
+.empty{padding:32px 20px;text-align:center;color:var(--sub);font-size:14px;line-height:1.6}
+.ph{margin:auto;text-align:center;color:var(--sub);padding:24px}
+#msgs{flex:1;overflow-y:auto;padding:16px 7%;display:flex;flex-direction:column;background-image:radial-gradient(color-mix(in srgb,var(--sub) 22%,transparent) 1px,transparent 1px);background-size:22px 22px}
+.day{align-self:center;margin:12px 0 8px}
+.day span{background:var(--panel);color:var(--sub);font-size:12px;font-weight:500;padding:5px 12px;border-radius:20px;box-shadow:var(--sh)}
+.b{max-width:72%;margin:2px 0;padding:8px 12px 7px;border-radius:18px;box-shadow:var(--sh);overflow-wrap:anywhere;white-space:pre-wrap}
+.b.out{align-self:flex-end;background:var(--out);border-bottom-right-radius:6px}
+.b.in{align-self:flex-start;background:var(--in);border-bottom-left-radius:6px}
+/* Mensajes de la Defensoría: negrita y azul. Mensajes del cliente: texto normal. */
+.b.staffmsg{color:#0b57d0;font-weight:700}
+.b.staffmsg .meta{color:#5b7fb5;font-weight:500}
+/* Parte informativa del mensaje de bienvenida: texto normal, azul oscuro. */
+.b.staffmsg .note{font-weight:400;color:#0b3d91;display:block}
+/* Parte de advertencia: texto normal, rojo, separada por un renglón. */
+.b.staffmsg .warn{font-weight:400;color:#c62828;display:block;margin-top:14px}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]) .b.staffmsg{color:#7fb2ff}
+:root:not([data-theme="light"]) .b.staffmsg .meta{color:#8aa8d0}
+:root:not([data-theme="light"]) .b.staffmsg .note{color:#a9c6ff}
+:root:not([data-theme="light"]) .b.staffmsg .warn{color:#ff8a80}}
+:root[data-theme="dark"] .b.staffmsg{color:#7fb2ff}
+:root[data-theme="dark"] .b.staffmsg .meta{color:#8aa8d0}
+:root[data-theme="dark"] .b.staffmsg .note{color:#a9c6ff}
+:root[data-theme="dark"] .b.staffmsg .warn{color:#ff8a80}
+.meta{float:right;margin:8px 0 -4px 12px;font-size:10.5px;color:var(--sub);white-space:nowrap;display:flex;align-items:center;gap:3px}
+.tk{color:#3aa0e8}
+.comp{display:flex;gap:10px;padding:12px 16px;background:var(--panel);border-top:1px solid var(--line);align-items:center}
+.comp input{flex:1;border:1.5px solid transparent;border-radius:24px;padding:12px 18px;background:var(--bg);outline:none;transition:border-color .15s}
+.comp input:focus{border-color:var(--acc)}
+.send{width:46px;height:46px;flex:none;border:0;border-radius:50%;background:linear-gradient(135deg,var(--acc),var(--acc2));color:var(--onacc);cursor:pointer;display:grid;place-items:center;transition:transform .1s,filter .15s}
+.send:hover{filter:brightness(1.08)}.send:active{transform:scale(.94)}
+.modal{position:fixed;inset:0;background:rgba(6,18,14,.55);backdrop-filter:blur(4px);display:grid;place-items:center;padding:16px;z-index:20}
+.card{background:var(--panel);border-radius:24px;padding:24px;width:100%;max-width:400px;display:flex;flex-direction:column;gap:12px;box-shadow:0 24px 60px -16px rgba(0,0,0,.45);animation:pop .18s ease-out}
+@keyframes pop{from{opacity:0;transform:scale(.96) translateY(6px)}}
+.card h2{margin:0;font-size:19px;font-weight:700;letter-spacing:-.02em}
+.acts{display:flex;gap:8px;justify-content:flex-end}
+.acts .btn{padding:10px 18px}
+.toast{position:fixed;left:50%;bottom:96px;transform:translateX(-50%);background:var(--txt);color:var(--panel);padding:10px 18px;border-radius:24px;font-size:13px;font-weight:500;z-index:30;box-shadow:0 8px 24px rgba(0,0,0,.25)}
+@media(max-width:700px){
+.side{width:100%;border:0}.main{display:none}
+#app.open .side{display:none}#app.open .main{display:flex}
+.back{display:inline-grid}#msgs{padding:12px 10px}.b{max-width:84%}}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script type="module">
+/* ============ CONFIGURACIÓN (completa esto) ============
+   Pega aquí tu firebaseConfig (Firebase Console → Configuración del proyecto → Tus apps). */
+const FIREBASE_CONFIG = {apiKey: "AIzaSyA6NpWwPJSD5bn-_LXo3tGVXzYM4vSPALw",
+  authDomain: "chat-def6.firebaseapp.com",
+  projectId: "chat-def6",
+  storageBucket: "chat-def6.firebasestorage.app",
+  messagingSenderId: "464104957132",
+  appId: "1:464104957132:web:c62bc672dd125da5dace69"};
+// Nombres de las colecciones de Firestore (si los cambias, cámbialos también en las reglas)
+const COL = { staff: 'staff', contacts: 'contacts', messages: 'messages' };
+const CONFIGURED = !/PEGA_AQUI/.test(JSON.stringify(FIREBASE_CONFIG));
+
+/* Mensajes automáticos del chat del cliente (no se guardan en Firestore: solo se muestran).
+   welcomeHtml lleva la parte informativa dentro de <span class="note"> (texto normal azul oscuro)
+   y la parte de advertencia dentro de <span class="warn"> (texto normal rojo), separadas por un renglón. */
+const AUTO = {
+  welcome: 'Bienvenido a nuestro chat. En breve un agente judicial de nuestra Defensoría atenderá tu consulta.'
+    + '\n\nTen en cuenta esto:'
+    + '\nExpediente de tu causa judicial'
+    + '\nTu nombre y apellido, DNI'
+    + '\nCon estos datos podremos brindarte la información de tu causa.'
+    + '\nEste chat permite consultas, pero no se reciben ni envían documentación, tampoco se notifica de resoluciones del Juzgado.'
+    + '\nPara notificarte alguna resolución del Juzgado en tu expediente debes concurrir a nuestra defensoría, de lunes a viernes de 7 a 11 hs.'
+    + '\nSábados, Domingos y Feriados nuestra oficina no atiende.',
+  welcomeHtml: 'Bienvenido a nuestro chat. En breve un agente judicial de nuestra Defensoría atenderá tu consulta.'
+    + '<br><br>Ten en cuenta esto:'
+    + '<span class="note">Expediente de tu causa judicial'
+    + '<br>Tu nombre y apellido, DNI'
+    + '<br>Con estos datos podremos brindarte la información de tu causa.</span>'
+    + '<span class="warn">Este chat permite consultas, pero no se reciben ni envían documentación, tampoco se notifica de resoluciones del Juzgado.'
+    + '<br>Para notificarte alguna resolución del Juzgado en tu expediente debes concurrir a nuestra defensoría, de lunes a viernes de 7 a 11 hs.'
+    + '<br>Sábados, Domingos y Feriados nuestra oficina no atiende.</span>',
+  delay: 'Disculpe la demora, nuestros agentes se encuentran ocupados. En breve te responderemos.'
+};
+const DELAY_MS = 5 * 60 * 1000; // 5 minutos
+
+/* ================= FIREBASE (Auth + Firestore) ================= */
+const V = '10.14.1', G = `https://www.gstatic.com/firebasejs/${V}/`;
+async function createFirebase(cfg) {
+  const [A, U, F] = await Promise.all([
+    import(G + 'firebase-app.js'), import(G + 'firebase-auth.js'), import(G + 'firebase-firestore.js')]);
+  const app = A.initializeApp(cfg), auth = U.getAuth(app), db = F.getFirestore(app);
+  auth.languageCode = 'es';
+  const digits = s => String(s).replace(/\D/g, '');
+  async function roleOf(u) {
+    if (u.isAnonymous) return { role: 'anon' };
+    if (u.phoneNumber) return { role: 'client', phone: digits(u.phoneNumber) };
+    const d = await F.getDoc(F.doc(db, COL.staff, u.uid)).catch(() => null);
+    return d && d.exists() ? { role: 'staff', admin: d.data().role === 'admin' } : null;
+  }
+  return {
+    mode: 'firebase',
+    session: () => new Promise(res => {
+      const off = U.onAuthStateChanged(auth, async u => { off(); res(u ? await roleOf(u) : null); });
+    }),
+    async staffLogin(email, pw) {
+      const c = await U.signInWithEmailAndPassword(auth, email, pw);
+      const r = await roleOf(c.user);
+      if (!r) { await U.signOut(auth); throw new Error('Esta cuenta no tiene permiso de personal.'); }
+      return r;
+    },
+    // Acceso de cliente SIN SMS: autenticación anónima.
+    async anonLogin() {
+      if (auth.currentUser) {
+        if (auth.currentUser.isAnonymous) return { role: 'anon' };
+        await U.signOut(auth);
+      }
+      await U.signInAnonymously(auth);
+      return { role: 'anon' };
+    },
+    signOut: () => U.signOut(auth),
+    getContact: async p => { const d = await F.getDoc(F.doc(db, COL.contacts, p)); return d.exists() ? d.data() : null; },
+    setContact: (p, d) => F.setDoc(F.doc(db, COL.contacts, p), d),
+    updateContact: (p, d) => F.updateDoc(F.doc(db, COL.contacts, p), d),
+    async deleteContact(p) {
+      const s = await F.getDocs(F.query(F.collection(db, COL.messages), F.where('cid', '==', p)));
+      for (let i = 0; i < s.docs.length; i += 400) { const b = F.writeBatch(db); s.docs.slice(i, i + 400).forEach(d => b.delete(d.ref)); await b.commit(); }
+      await F.deleteDoc(F.doc(db, COL.contacts, p));
+    },
+    watchContacts: (cb, er) => F.onSnapshot(F.collection(db, COL.contacts),
+      s => cb(s.docs.map(d => ({ id: d.id, ...d.data() }))), er),
+    watchMsgs: (cid, cb, er) => F.onSnapshot(
+      cid ? F.query(F.collection(db, COL.messages), F.where('cid', '==', cid)) : F.collection(db, COL.messages),
+      s => cb(s.docs.map(d => d.data())), er),
+    addMsg: m => F.addDoc(F.collection(db, COL.messages), m)
+  };
+}
+
+/* ============ APLICACIÓN ============ */
+
+const $ = s => document.querySelector(s);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const ls = { get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } }, set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} } };
+const clean = s => String(s).replace(/\D/g, '');
+const showPhone = id => '+' + String(id == null ? '' : id).replace(/^\+/, '');
+const tm = t => new Date(t).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+const dayLbl = t => { const d = new Date(t), n = new Date(); if (d.toDateString() === n.toDateString()) return 'Hoy'; if (d.toDateString() === new Date(n - 864e5).toDateString()) return 'Ayer'; return d.toLocaleDateString('es-AR', { day: 'numeric', month: 'long' }); };
+const ic = d => `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+const I = { add: ic('<path d="M12 5v14M5 12h14"/>'), edit: ic('<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>'),
+  del: ic('<path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/>'), out: ic('<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>'),
+  back: ic('<path d="M19 12H5M12 19l-7-7 7-7"/>'), send: ic('<path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"/>') };
+const TK = '<svg class="tk" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12.5l4.5 4.5L15 7.5M10 15.5l1.5 1.5L21 7.5"/></svg>';
+/* Campo de teléfono con prefijo fijo +54 9 (Argentina, móvil): se muestra solo y no se puede borrar ni duplicar. */
+function arPhone(inp) {
+  const P = '+54 9 ';
+  const fix = () => {
+    let d = clean(inp.value);
+    if (d.startsWith('549')) d = d.slice(3);
+    if (d.length > 10) {
+      if (d.startsWith('549')) d = d.slice(3);
+      else if (d.startsWith('54')) d = d.slice(2);
+      else if (d.startsWith('9')) d = d.slice(1);
+    }
+    d = d.replace(/^0+/, '').slice(0, 10);
+    const v = P + d;
+    if (inp.value !== v) inp.value = v;
+  };
+  inp.addEventListener('input', fix);
+  const end = () => { if (inp.selectionStart === inp.selectionEnd && inp.selectionStart < P.length) inp.setSelectionRange(inp.value.length, inp.value.length); };
+  inp.addEventListener('focus', () => { end(); setTimeout(end); });
+  inp.addEventListener('click', end);
+  fix();
+}
+const hue = s => [...String(s)].reduce((a, c) => a + c.charCodeAt(0), 0) % 360;
+const av = n => `<div class="av" style="background:linear-gradient(135deg,hsl(${hue(n)} 62% 54%),hsl(${(hue(n) + 35) % 360} 60% 40%))">${esc(((n || '?').trim()[0] || '?').toUpperCase())}</div>`;
+const errMsg = e => { const c = (e && e.code) || '';
+  if (/invalid-credential|wrong-password|user-not-found|invalid-email/.test(c)) return 'Correo o contraseña incorrectos.';
+  if (/too-many/.test(c)) return 'Demasiados intentos. Espera unos minutos e intenta de nuevo.';
+  if (/permission-denied/.test(c)) return 'No tienes permiso para esta acción. Revisa las reglas de Firestore.';
+  if (/operation-not-allowed/.test(c)) return 'El acceso anónimo no está habilitado en Firebase Authentication.';
+  if (/unauthorized-domain/.test(c)) return 'Este dominio no está autorizado en Firebase (Authentication → Configuración).';
+  if (/network-request-failed/.test(c)) return 'Sin conexión. Revisa tu internet.';
+  return (e && e.message) || 'Ocurrió un error.'; };
+
+let S, unsubs = [], contacts = {}, msgs = [], active = null, me = null, phone = null, admin = false;
+let autoMsgs = [], autoTimer = null, welcomed = false;
+const stop = () => {
+  unsubs.forEach(f => f()); unsubs = []; msgs = []; contacts = {}; active = null;
+  autoMsgs = []; welcomed = false;
+  if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; }
+};
+function toast(t) { const e = document.createElement('div'); e.className = 'toast'; e.textContent = t; document.body.appendChild(e); setTimeout(() => e.remove(), 2500); }
+async function logout() { stop(); me = null; try { await S.signOut(); } catch (e) {} showRole(); }
+
+/* ---------- Pantalla inicial ---------- */
+function showRole() {
+  stop(); $('#app').className = '';
+  $('#app').innerHTML = `<div class="center"><div class="logo">⚖️</div><h1>Defensoría Oficial Civil 6</h1>
+  <p class="sub"><strong>MINISTERIO PÚBLICO DE MISIONES</strong></p>
+  <p class="sub">Av. Santa Catalina 1735, 1° piso – Posadas, Misiones</p>
+  <p class="sub">Mensajería entre la Defensoría y las personas asistidas</p>
+  <button class="btn" id="rc">Soy cliente</button><button class="btn alt" id="re">Soy de la Defensoría</button></div>`;
+  $('#rc').onclick = () => showLogin(); $('#re').onclick = () => showStaffLogin();
+}
+
+/* ---------- Acceso del personal ---------- */
+function showStaffLogin(err) {
+  $('#app').innerHTML = `<div class="center"><div class="logo">⚖️</div><h1>Personal de la Defensoría</h1>
+  <input class="field" id="em" type="email" placeholder="Correo" autocomplete="username"><input class="field" id="pw" type="password" placeholder="Contraseña" autocomplete="current-password">
+  <p class="err" id="er">${esc(err || '')}</p><button class="btn" id="go">Ingresar</button><button class="btn alt" id="bk">Volver</button></div>`;
+  $('#bk').onclick = showRole;
+  const go = async () => {
+    $('#go').disabled = true; $('#er').textContent = '';
+    try { enterStaff((await S.staffLogin($('#em').value.trim(), $('#pw').value)).admin); }
+    catch (e) { $('#er').textContent = errMsg(e); $('#go').disabled = false; }
+  };
+  $('#go').onclick = go; $('#pw').onkeydown = e => { if (e.key === 'Enter') go(); };
+}
+
+/* ---------- Acceso del cliente (sin SMS) ---------- */
+function showLogin(err, ok) {
+  $('#app').innerHTML = `<div class="center"><div class="logo">💬</div><h1>Ingresa tu número</h1>
+  <p class="sub">Usa el número con el que la Defensoría te registró.</p>
+  <input class="field" id="ph" type="tel" inputmode="tel" value="+54 9 " autocomplete="tel">
+  <p class="err ${ok ? 'ok' : ''}" id="er">${esc(err || '')}</p>
+  <button class="btn" id="go">Ingresar</button><button class="btn alt" id="bk">Volver</button></div>`;
+  $('#bk').onclick = showRole;
+  arPhone($('#ph'));
+  $('#go').onclick = async () => {
+    const p = clean($('#ph').value);
+    const er = $('#er'); er.className = 'err'; er.textContent = '';
+    if (p.length !== 13) { er.textContent = 'Ingresa la característica y el número (10 dígitos), sin 0 ni 15.'; return; }
+    $('#go').disabled = true;
+    try {
+      // Autenticación anónima solo para poder leer Firestore según las reglas.
+      await S.anonLogin();
+      const f = await findContact(p);
+      if (!f) {
+        er.textContent = 'Este número no está registrado. Verifica que sea el mismo con el que te registró la Defensoría.';
+        $('#go').disabled = false;
+        return;
+      }
+      enterClient(f.id, f.c);
+    } catch (e) {
+      console.error('Acceso cliente:', e);
+      er.textContent = errMsg(e);
+      $('#go').disabled = false;
+    }
+  };
+  $('#ph').onkeydown = e => { if (e.key === 'Enter') $('#go').click(); };
+}
+/* Busca el contacto probando el número en todos los formatos posibles
+   (con/sin "+", con/sin 54, con/sin el 9 de móvil). */
+async function findContact(p) {
+  const d = String(p).replace(/\D/g, '');
+  const nat = d.startsWith('549') ? d.slice(3) : d.startsWith('54') ? d.slice(2) : d;
+  const cands = [d, '+' + d, nat, '+54' + nat, '549' + nat, '+549' + nat, '54' + nat];
+  const seen = new Set();
+  for (const id of cands) {
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    const c = await S.getContact(id).catch(() => null);
+    if (c) return { id, c };
+  }
+  return null;
+}
+function enterClient(p, c) {
+  stop(); me = 'client'; phone = p; $('#app').className = '';
+  const nm = (c && c.name) ? c.name : 'Cliente';
+  $('#app').innerHTML = `<div class="single"><div class="bar">${av('Defensoría Oficial')}<div style="flex:1"><div class="t">Defensoría Oficial Civil 6</div><div class="s">Hola, ${esc(nm)}</div></div><button class="ib" id="out" title="Salir" aria-label="Salir">${I.out}</button></div><div id="msgs"></div>${composer()}</div>`;
+  $('#out').onclick = logout; wireComposer();
+  // Programa el aviso automático por demora de 5 minutos sin respuesta.
+  scheduleDelay();
+  unsubs.push(S.watchMsgs(p, l => {
+    msgs = l;
+    // Mensaje automático de bienvenida: solo si la conversación está vacía.
+    if (!welcomed) {
+      welcomed = true;
+      if (!l.length) autoMsgs.push({ cid: p, from: 'staff', text: AUTO.welcome, ts: Date.now(), auto: true, welcome: true });
+    }
+    renderMsgs();
+  }, e => { console.error('Mensajes (cliente):', e); toast('No se pudieron cargar los mensajes.'); }));
+}
+/* Aviso automático si pasan 5 minutos sin respuesta del personal. */
+function scheduleDelay() {
+  if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; }
+  if (autoMsgs.some(a => a.delay)) return; // ya se mostró en esta sesión
+  autoTimer = setTimeout(() => {
+    autoTimer = null;
+    if (me !== 'client' || !phone) return;
+    const list = msgs.filter(m => m.cid === phone);
+    const last = f => list.filter(m => m.from === f).reduce((a, m) => m.ts > a ? m.ts : a, 0);
+    if (last('staff') > last('client')) return;              // ya respondió el personal
+    if (autoMsgs.some(a => a.delay)) return;
+    autoMsgs.push({ cid: phone, from: 'staff', text: AUTO.delay, ts: Date.now(), delay: true });
+    renderMsgs();
+  }, DELAY_MS);
+}
+
+/* ---------- Personal ---------- */
+function enterStaff(adm) {
+  stop(); me = 'staff'; admin = !!adm; $('#app').className = '';
+  $('#app').innerHTML = `<div class="side"><div class="bar"><div><div class="t">Defensoría Oficial Civil 6</div><div class="s">${admin ? 'Administrador' : 'Empleado'}</div></div><div class="tools"><button class="ib pri" id="add" title="Nuevo contacto" aria-label="Nuevo contacto">${I.add}</button><button class="ib" id="out" title="Salir" aria-label="Salir">${I.out}</button></div></div>
+  <div class="search"><input class="field" id="q" placeholder="Buscar o empezar un chat"></div><div id="list"></div></div>
+  <div class="main" id="main"><div class="ph"><div class="logo">⚖️</div><p>Selecciona un chat para ver la conversación</p></div></div>`;
+  $('#out').onclick = logout; $('#add').onclick = addContact; $('#q').oninput = renderSide;
+  $('#list').onclick = e => { const r = e.target.closest('.row'); if (r) openChat(r.dataset.id); };
+  unsubs.push(S.watchContacts(l => { contacts = {}; l.forEach(c => contacts[c.id] = c); renderSide(); if (active && !contacts[active]) closeChat(); }, () => toast('Error de conexión')));
+  unsubs.push(S.watchMsgs(null, l => { msgs = l; renderSide(); renderMsgs(); }, () => toast('Error de conexión')));
+}
+function renderSide() {
+  const el = $('#list'); if (!el) return;
+  const q = ($('#q').value || '').toLowerCase(), lr = ls.get('lr') || {};
+  const rows = Object.entries(contacts).map(([id, c]) => {
+    const ms = msgs.filter(m => m.cid === id), last = ms.reduce((a, m) => !a || m.ts > a.ts ? m : a, null);
+    const un = id === active ? 0 : ms.filter(m => m.from === 'client' && m.ts > (lr[id] || 0)).length;
+    return { id, c, last, un };
+  }).filter(r => ((r.c.name || '') + r.id).toLowerCase().includes(q))
+    .sort((a, b) => ((b.last && b.last.ts) || b.c.createdAt || 0) - ((a.last && a.last.ts) || a.c.createdAt || 0));
+  el.innerHTML = rows.map(r => `<div class="row${r.id === active ? ' on' : ''}" data-id="${esc(r.id)}">${av(r.c.name)}<div class="mid"><div class="n"><span>${esc(r.c.name)}</span><small>${r.last ? tm(r.last.ts) : ''}</small></div><div class="p"><span>${r.last ? (r.last.from === 'staff' ? '✓ ' : '') + esc(r.last.text) : showPhone(r.id)}</span>${r.un ? `<span class="badge">${r.un}</span>` : ''}</div></div></div>`).join('')
+    || '<div class="empty">Aún no hay contactos.<br>Usa ➕ para registrar a una persona asistida.</div>';
+}
+function openChat(id) {
+  active = id; const c = contacts[id] || {};
+  $('#app').classList.add('open'); $('#main').className = 'main';
+  $('#main').innerHTML = `<div class="bar"><button class="ib back" id="bk" aria-label="Volver">${I.back}</button>${av(c.name)}<div style="flex:1;min-width:0"><div class="t">${esc(c.name)}</div><div class="s">${showPhone(id)}</div></div>${admin ? `<button class="ib" id="ed" title="Editar contacto" aria-label="Editar contacto">${I.edit}</button><button class="ib dng" id="dl" title="Borrar contacto" aria-label="Borrar contacto">${I.del}</button>` : ''}</div><div id="msgs"></div>${composer()}`;
+  $('#bk').onclick = () => { active = null; $('#app').classList.remove('open'); renderSide(); };
+  if (admin) { $('#ed').onclick = () => editContact(id); $('#dl').onclick = () => delContact(id); }
+  wireComposer(); renderMsgs(); renderSide(); if (innerWidth > 700) $('#inp').focus();
+}
+function addContact() {
+  const m = document.createElement('div'); m.className = 'modal';
+  m.innerHTML = `<div class="card"><h2>Nuevo contacto</h2><input class="field" id="cn" placeholder="Nombre y apellido"><input class="field" id="cp" type="tel" inputmode="tel" value="+54 9 " autocomplete="off"><p class="sub">El prefijo +54 9 se agrega solo. Escribe la característica y el número, sin 0 ni 15 (ej.: 376 4123456).</p><p class="err" id="ce"></p><div class="acts"><button class="btn alt" id="cc">Cancelar</button><button class="btn" id="cs">Guardar</button></div></div>`;
+  document.body.appendChild(m); $('#cn').focus(); $('#cc').onclick = () => m.remove();
+  arPhone($('#cp'));
+  $('#cs').onclick = async () => {
+    const n = $('#cn').value.trim(), p = clean($('#cp').value);
+    if (!n || p.length !== 13) return $('#ce').textContent = 'Ingresa el nombre y el número completo: característica + número (10 dígitos).';
+    if (contacts[p]) return $('#ce').textContent = 'Ese número ya está registrado.';
+    try { await S.setContact(p, { name: n.slice(0, 80), phone: p, createdAt: Date.now() }); m.remove(); toast('Contacto registrado'); }
+    catch (e) { $('#ce').textContent = errMsg(e); }
+  };
+}
+
+/* ---------- Administrador: editar y borrar ---------- */
+function closeChat() {
+  active = null; $('#app').classList.remove('open'); $('#main').className = 'main';
+  $('#main').innerHTML = '<div class="ph"><div class="logo">⚖️</div><p>Selecciona un chat para ver la conversación</p></div>'; renderSide();
+}
+function editContact(id) {
+  const c = contacts[id]; if (!admin || !c) return;
+  const m = document.createElement('div'); m.className = 'modal';
+  m.innerHTML = `<div class="card"><h2>Editar contacto</h2><input class="field" id="cn" maxlength="80" value="${esc(c.name)}"><p class="sub">Teléfono: ${showPhone(id)}. No se puede cambiar; para otro número, crea un contacto nuevo.</p><p class="err" id="ce"></p><div class="acts"><button class="btn alt" id="cc">Cancelar</button><button class="btn" id="cs">Guardar</button></div></div>`;
+  document.body.appendChild(m); $('#cn').focus(); $('#cc').onclick = () => m.remove();
+  $('#cs').onclick = async () => {
+    const n = $('#cn').value.trim().slice(0, 80); if (!n) return $('#ce').textContent = 'Ingresa un nombre.';
+    try { await S.updateContact(id, { name: n }); contacts[id].name = n; m.remove(); openChat(id); toast('Contacto actualizado'); }
+    catch (e) { $('#ce').textContent = errMsg(e); }
+  };
+}
+async function delContact(id) {
+  const c = contacts[id]; if (!admin || !c || !confirm('¿Borrar a ' + c.name + ' y toda su conversación? No se puede deshacer.')) return;
+  try { await S.deleteContact(id); closeChat(); toast('Contacto borrado'); }
+  catch (e) { toast(errMsg(e)); }
+}
+
+/* ---------- Chat común ---------- */
+const composer = () => `<div class="comp"><input id="inp" placeholder="Escribe un mensaje" autocomplete="off" maxlength="2000"><button class="send" id="send" title="Enviar" aria-label="Enviar">${I.send}</button></div>`;
+function wireComposer() { $('#send').onclick = send; $('#inp').onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }; }
+const curCid = () => me === 'staff' ? active : phone;
+function renderMsgs() {
+  const el = $('#msgs'), cid = curCid(); if (!el || !cid) return;
+  // Se combinan los mensajes reales con los mensajes automáticos del cliente.
+  const list = msgs.filter(m => m.cid === cid).concat(autoMsgs.filter(a => a.cid === cid)).sort((a, b) => a.ts - b.ts);
+  const near = el.scrollHeight - el.scrollTop - el.clientHeight < 80, mine = me === 'staff' ? 'staff' : 'client';
+  let h = '', last = '';
+  list.forEach(m => { const d = dayLbl(m.ts); if (d !== last) { h += `<div class="day"><span>${d}</span></div>`; last = d; }
+    const o = m.from === mine;
+    // Los mensajes de la Defensoría van en negrita azul; los del cliente, en texto normal.
+    const who = m.from === 'staff' ? 'staffmsg' : 'clientmsg';
+    // La bienvenida usa su propio HTML: parte informativa azul oscuro y parte de advertencia roja.
+    const body = m.welcome ? AUTO.welcomeHtml : esc(m.text);
+    h += `<div class="b ${o ? 'out' : 'in'} ${who}">${body}<span class="meta">${tm(m.ts)}${o ? TK : ''}</span></div>`; });
+  el.innerHTML = h || '<div class="day"><span>Aún no hay mensajes</span></div>';
+  if (near || el._c !== cid) { el.scrollTop = el.scrollHeight; el._c = cid; }
+  if (me === 'staff' && list.length) { const lr = ls.get('lr') || {}, mx = list[list.length - 1].ts; if ((lr[cid] || 0) < mx) { lr[cid] = mx; ls.set('lr', lr); renderSide(); } }
+}
+async function send() {
+  const i = $('#inp'), t = i.value.trim(), cid = curCid(); if (!t || !cid) return; i.value = '';
+  try {
+    await S.addMsg({ cid, from: me === 'staff' ? 'staff' : 'client', text: t.slice(0, 2000), ts: Date.now() });
+    // Cada mensaje nuevo del cliente reinicia la cuenta de 5 minutos sin respuesta.
+    if (me === 'client') scheduleDelay();
+  }
+  catch (e) { console.error('Enviar mensaje:', e); i.value = t; toast('No se pudo enviar el mensaje'); }
+}
+
+/* ---------- Inicio ---------- */
+(async () => {
+  if (!CONFIGURED) { $('#app').innerHTML = '<div class="center"><div class="logo">🔧</div><h1>Falta configurar Firebase</h1><p class="sub">Pega tu firebaseConfig en FIREBASE_CONFIG (dentro del código). Los pasos están al inicio del archivo.</p></div>'; return; }
+  try { S = await createFirebase(FIREBASE_CONFIG); }
+  catch (e) { document.body.textContent = 'No se pudo iniciar Firebase: ' + e.message; return; }
+  showRole();
+  const s = await S.session().catch(() => null);
+  if (s && s.role === 'staff') enterStaff(s.admin);
+  else if (s && s.role === 'client') {
+    let f = null;
+    try { f = await findContact(s.phone); } catch (e) {}
+    f ? enterClient(f.id, f.c) : S.signOut().catch(() => {});
+  }
+  // Si es anónimo, queda en la pantalla inicial para que ingrese su número.
+})();
+
+</script>
+</body>
+</html>
