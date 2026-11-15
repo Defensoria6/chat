@@ -28,7 +28,8 @@
       empleado → ve y crea contactos y conversa; no edita ni borra.
     Sin ese documento, la cuenta no tiene acceso de personal.
  5. Clientes: el personal los registra (botón ➕) con el teléfono en dígitos y
-    código de país (ej. 5493764123456). El cliente entra escribiendo ese número.
+    código de país (ej. 5493764123456) y el empleado asignado (campo "employee",
+    visible solo para el personal). El cliente entra escribiendo ese número.
     No se envía SMS: el acceso se concede si el número existe en contacts.
     ⚠️ Esto implica que cualquiera que conozca un número registrado puede
     entrar a ese chat. Es el comportamiento pedido (sin verificación por SMS).
@@ -44,10 +45,13 @@
      function isAdmin() { return isStaff() &&
        get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.role == 'admin'; }
      function validContact() { return
-       request.resource.data.keys().hasOnly(['name','phone','createdAt'])
+       request.resource.data.keys().hasOnly(['name','phone','createdAt','employee'])
        && request.resource.data.name is string
        && request.resource.data.name.size() > 0
-       && request.resource.data.name.size() <= 80; }
+       && request.resource.data.name.size() <= 80
+       && (!('employee' in request.resource.data.keys())
+           || (request.resource.data.employee is string
+               && request.resource.data.employee.size() <= 80)); }
      match /staff/{uid} {
        allow read: if signedIn() && request.auth.uid == uid;
        allow write: if false;
@@ -129,6 +133,9 @@ h1{margin:0;font-size:22px;font-weight:700;letter-spacing:-.02em}
 .row .n small{color:var(--sub);font-weight:500;font-size:11.5px}
 .row .p{color:var(--sub);font-size:13px;display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:2px}
 .row .p span:first-child{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* Empleado asignado al cliente (solo se muestra en el modo Defensoría). */
+.asg{font-size:12px;font-weight:600;color:var(--acc2);overflow-wrap:anywhere}
+.row .asg{font-size:11.5px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .badge{background:var(--acc);color:var(--onacc);border-radius:20px;min-width:20px;padding:0 6px;font-size:11.5px;text-align:center;line-height:20px;font-weight:700}
 .empty{padding:32px 20px;text-align:center;color:var(--sub);font-size:14px;line-height:1.6}
 .ph{margin:auto;text-align:center;color:var(--sub);padding:24px}
@@ -279,6 +286,8 @@ const I = { add: ic('<path d="M12 5v14M5 12h14"/>'), edit: ic('<path d="M12 20h9
   del: ic('<path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/>'), out: ic('<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>'),
   back: ic('<path d="M19 12H5M12 19l-7-7 7-7"/>'), send: ic('<path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"/>') };
 const TK = '<svg class="tk" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12.5l4.5 4.5L15 7.5M10 15.5l1.5 1.5L21 7.5"/></svg>';
+/* Ícono estilo WhatsApp (burbuja de chat con teléfono) que reemplaza a la balanza en los logos. */
+const WA = '<svg width="44" height="44" viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="23" r="19.5" style="fill:var(--acc)"/><path d="M7 43.5 9.5 29.5 20.5 39.5Z" style="fill:var(--acc);stroke:var(--acc)" stroke-width="3" stroke-linejoin="round"/><path transform="translate(14 13) scale(.8)" style="fill:var(--onacc)" d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>';
 /* Campo de teléfono con prefijo fijo +54 9 (Argentina, móvil): se muestra solo y no se puede borrar ni duplicar. */
 function arPhone(inp) {
   const P = '+54 9 ';
@@ -324,7 +333,7 @@ async function logout() { stop(); me = null; try { await S.signOut(); } catch (e
 /* ---------- Pantalla inicial ---------- */
 function showRole() {
   stop(); $('#app').className = '';
-  $('#app').innerHTML = `<div class="center"><div class="logo">⚖️</div><h1>Defensoría Oficial Civil 6</h1>
+  $('#app').innerHTML = `<div class="center"><div class="logo">${WA}</div><h1>Defensoría Oficial Civil 6</h1>
   <p class="sub"><strong>MINISTERIO PÚBLICO DE MISIONES</strong></p>
   <p class="sub">Av. Santa Catalina 1735, 1° piso – Posadas, Misiones</p>
   <p class="sub">Mensajería entre la Defensoría y las personas asistidas</p>
@@ -334,7 +343,7 @@ function showRole() {
 
 /* ---------- Acceso del personal ---------- */
 function showStaffLogin(err) {
-  $('#app').innerHTML = `<div class="center"><div class="logo">⚖️</div><h1>Personal de la Defensoría</h1>
+  $('#app').innerHTML = `<div class="center"><div class="logo">${WA}</div><h1>Personal de la Defensoría</h1>
   <input class="field" id="em" type="email" placeholder="Correo" autocomplete="username"><input class="field" id="pw" type="password" placeholder="Contraseña" autocomplete="current-password">
   <p class="err" id="er">${esc(err || '')}</p><button class="btn" id="go">Ingresar</button><button class="btn alt" id="bk">Volver</button></div>`;
   $('#bk').onclick = showRole;
@@ -431,7 +440,7 @@ function enterStaff(adm) {
   stop(); me = 'staff'; admin = !!adm; $('#app').className = '';
   $('#app').innerHTML = `<div class="side"><div class="bar"><div><div class="t">Defensoría Oficial Civil 6</div><div class="s">${admin ? 'Administrador' : 'Empleado'}</div></div><div class="tools"><button class="ib pri" id="add" title="Nuevo contacto" aria-label="Nuevo contacto">${I.add}</button><button class="ib" id="out" title="Salir" aria-label="Salir">${I.out}</button></div></div>
   <div class="search"><input class="field" id="q" placeholder="Buscar o empezar un chat"></div><div id="list"></div></div>
-  <div class="main" id="main"><div class="ph"><div class="logo">⚖️</div><p>Selecciona un chat para ver la conversación</p></div></div>`;
+  <div class="main" id="main"><div class="ph"><div class="logo">${WA}</div><p>Selecciona un chat para ver la conversación</p></div></div>`;
   $('#out').onclick = logout; $('#add').onclick = addContact; $('#q').oninput = renderSide;
   $('#list').onclick = e => { const r = e.target.closest('.row'); if (r) openChat(r.dataset.id); };
   unsubs.push(S.watchContacts(l => { contacts = {}; l.forEach(c => contacts[c.id] = c); renderSide(); if (active && !contacts[active]) closeChat(); }, () => toast('Error de conexión')));
@@ -446,27 +455,28 @@ function renderSide() {
     return { id, c, last, un };
   }).filter(r => ((r.c.name || '') + r.id).toLowerCase().includes(q))
     .sort((a, b) => ((b.last && b.last.ts) || b.c.createdAt || 0) - ((a.last && a.last.ts) || a.c.createdAt || 0));
-  el.innerHTML = rows.map(r => `<div class="row${r.id === active ? ' on' : ''}" data-id="${esc(r.id)}">${av(r.c.name)}<div class="mid"><div class="n"><span>${esc(r.c.name)}</span><small>${r.last ? tm(r.last.ts) : ''}</small></div><div class="p"><span>${r.last ? (r.last.from === 'staff' ? '✓ ' : '') + esc(r.last.text) : showPhone(r.id)}</span>${r.un ? `<span class="badge">${r.un}</span>` : ''}</div></div></div>`).join('')
+  el.innerHTML = rows.map(r => `<div class="row${r.id === active ? ' on' : ''}" data-id="${esc(r.id)}">${av(r.c.name)}<div class="mid"><div class="n"><span>${esc(r.c.name)}</span><small>${r.last ? tm(r.last.ts) : ''}</small></div><div class="p"><span>${r.last ? (r.last.from === 'staff' ? '✓ ' : '') + esc(r.last.text) : showPhone(r.id)}</span>${r.un ? `<span class="badge">${r.un}</span>` : ''}</div>${r.c.employee ? `<div class="asg">Empleado: ${esc(r.c.employee)}</div>` : ''}</div></div>`).join('')
     || '<div class="empty">Aún no hay contactos.<br>Usa ➕ para registrar a una persona asistida.</div>';
 }
 function openChat(id) {
   active = id; const c = contacts[id] || {};
   $('#app').classList.add('open'); $('#main').className = 'main';
-  $('#main').innerHTML = `<div class="bar"><button class="ib back" id="bk" aria-label="Volver">${I.back}</button>${av(c.name)}<div style="flex:1;min-width:0"><div class="t">${esc(c.name)}</div><div class="s">${showPhone(id)}</div></div>${admin ? `<button class="ib" id="ed" title="Editar contacto" aria-label="Editar contacto">${I.edit}</button><button class="ib dng" id="dl" title="Borrar contacto" aria-label="Borrar contacto">${I.del}</button>` : ''}</div><div id="msgs"></div>${composer()}`;
+  $('#main').innerHTML = `<div class="bar"><button class="ib back" id="bk" aria-label="Volver">${I.back}</button>${av(c.name)}<div style="flex:1;min-width:0"><div class="t">${esc(c.name)}</div><div class="s">${showPhone(id)}</div>${c.employee ? `<div class="s asg">Empleado asignado: ${esc(c.employee)}</div>` : ''}</div>${admin ? `<button class="ib" id="ed" title="Editar contacto" aria-label="Editar contacto">${I.edit}</button><button class="ib dng" id="dl" title="Borrar contacto" aria-label="Borrar contacto">${I.del}</button>` : ''}</div><div id="msgs"></div>${composer()}`;
   $('#bk').onclick = () => { active = null; $('#app').classList.remove('open'); renderSide(); };
   if (admin) { $('#ed').onclick = () => editContact(id); $('#dl').onclick = () => delContact(id); }
   wireComposer(); renderMsgs(); renderSide(); if (innerWidth > 700) $('#inp').focus();
 }
 function addContact() {
   const m = document.createElement('div'); m.className = 'modal';
-  m.innerHTML = `<div class="card"><h2>Nuevo contacto</h2><input class="field" id="cn" placeholder="Nombre y apellido"><input class="field" id="cp" type="tel" inputmode="tel" value="+54 9 " autocomplete="off"><p class="sub">El prefijo +54 9 se agrega solo. Escribe la característica y el número, sin 0 ni 15 (ej.: 376 4123456).</p><p class="err" id="ce"></p><div class="acts"><button class="btn alt" id="cc">Cancelar</button><button class="btn" id="cs">Guardar</button></div></div>`;
+  m.innerHTML = `<div class="card"><h2>Nuevo contacto</h2><input class="field" id="cn" placeholder="Nombre y apellido"><input class="field" id="cp" type="tel" inputmode="tel" value="+54 9 " autocomplete="off"><p class="sub">El prefijo +54 9 se agrega solo. Escribe la característica y el número, sin 0 ni 15 (ej.: 376 4123456).</p><input class="field" id="cw" maxlength="80" placeholder="Empleado asignado (obligatorio)" autocomplete="off"><p class="err" id="ce"></p><div class="acts"><button class="btn alt" id="cc">Cancelar</button><button class="btn" id="cs">Guardar</button></div></div>`;
   document.body.appendChild(m); $('#cn').focus(); $('#cc').onclick = () => m.remove();
   arPhone($('#cp'));
   $('#cs').onclick = async () => {
-    const n = $('#cn').value.trim(), p = clean($('#cp').value);
+    const n = $('#cn').value.trim(), p = clean($('#cp').value), emp = $('#cw').value.trim().slice(0, 80);
     if (!n || p.length !== 13) return $('#ce').textContent = 'Ingresa el nombre y el número completo: característica + número (10 dígitos).';
+    if (!emp) return $('#ce').textContent = 'Indica el empleado asignado a este cliente.';
     if (contacts[p]) return $('#ce').textContent = 'Ese número ya está registrado.';
-    try { await S.setContact(p, { name: n.slice(0, 80), phone: p, createdAt: Date.now() }); m.remove(); toast('Contacto registrado'); }
+    try { await S.setContact(p, { name: n.slice(0, 80), phone: p, employee: emp, createdAt: Date.now() }); m.remove(); toast('Contacto registrado'); }
     catch (e) { $('#ce').textContent = errMsg(e); }
   };
 }
@@ -474,16 +484,18 @@ function addContact() {
 /* ---------- Administrador: editar y borrar ---------- */
 function closeChat() {
   active = null; $('#app').classList.remove('open'); $('#main').className = 'main';
-  $('#main').innerHTML = '<div class="ph"><div class="logo">⚖️</div><p>Selecciona un chat para ver la conversación</p></div>'; renderSide();
+  $('#main').innerHTML = `<div class="ph"><div class="logo">${WA}</div><p>Selecciona un chat para ver la conversación</p></div>`; renderSide();
 }
 function editContact(id) {
   const c = contacts[id]; if (!admin || !c) return;
   const m = document.createElement('div'); m.className = 'modal';
-  m.innerHTML = `<div class="card"><h2>Editar contacto</h2><input class="field" id="cn" maxlength="80" value="${esc(c.name)}"><p class="sub">Teléfono: ${showPhone(id)}. No se puede cambiar; para otro número, crea un contacto nuevo.</p><p class="err" id="ce"></p><div class="acts"><button class="btn alt" id="cc">Cancelar</button><button class="btn" id="cs">Guardar</button></div></div>`;
+  m.innerHTML = `<div class="card"><h2>Editar contacto</h2><input class="field" id="cn" maxlength="80" value="${esc(c.name)}"><input class="field" id="cw" maxlength="80" placeholder="Empleado asignado" value="${esc(c.employee || '')}" autocomplete="off"><p class="sub">Teléfono: ${showPhone(id)}. No se puede cambiar; para otro número, crea un contacto nuevo.</p><p class="err" id="ce"></p><div class="acts"><button class="btn alt" id="cc">Cancelar</button><button class="btn" id="cs">Guardar</button></div></div>`;
   document.body.appendChild(m); $('#cn').focus(); $('#cc').onclick = () => m.remove();
   $('#cs').onclick = async () => {
     const n = $('#cn').value.trim().slice(0, 80); if (!n) return $('#ce').textContent = 'Ingresa un nombre.';
-    try { await S.updateContact(id, { name: n }); contacts[id].name = n; m.remove(); openChat(id); toast('Contacto actualizado'); }
+    // En contactos antiguos (sin empleado) el campo puede quedar vacío; en los nuevos se exige al crearlos.
+    const emp = $('#cw').value.trim().slice(0, 80);
+    try { await S.updateContact(id, { name: n, employee: emp }); contacts[id].name = n; contacts[id].employee = emp; m.remove(); openChat(id); toast('Contacto actualizado'); }
     catch (e) { $('#ce').textContent = errMsg(e); }
   };
 }
