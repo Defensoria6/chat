@@ -34,6 +34,14 @@
     ⚠️ Esto implica que cualquiera que conozca un número registrado puede
     entrar a ese chat. Es el comportamiento pedido (sin verificación por SMS).
  6. Publica este archivo en un hosting HTTPS (por ejemplo Firebase Hosting).
+ 7. Horario del cliente: solo puede ingresar y escribir de lunes a viernes, de 7 a 11 h
+    (hora de Argentina), salvo feriados. Los feriados nacionales y el provincial de Misiones
+    vienen cargados en el código (HOL_YEARLY / HOL_DATES). El administrador agrega otros con el
+    botón de calendario de la barra lateral (se guardan en la colección holidays). Para que
+    funcione, agrega al final las reglas de /holidays que figuran abajo y publícalas.
+    El personal (modo Defensoría) está siempre disponible y puede escribir a cualquier hora.
+    El cliente solo RECIBE mensajes de la Defensoría dentro del horario habilitado: los que se
+    envían fuera de horario quedan retenidos y los ve al ingresar en el próximo horario habilitado.
 
  REGLAS DE FIRESTORE
  rules_version = '2';
@@ -75,6 +83,20 @@
              || (signedIn() && request.resource.data.from == 'client'))
          && exists(/databases/$(database)/documents/contacts/$(request.resource.data.cid));
        allow update: if false;
+       allow delete: if isAdmin();
+     }
+     match /holidays/{id} {
+       // Feriados agregados por el administrador. Lectura pública: el cliente todavía no
+       // inició sesión cuando se comprueba el horario. Solo el administrador escribe.
+       allow read: if true;
+       allow create, update: if isAdmin()
+         && request.resource.data.keys().hasOnly(['date','name','yearly','createdAt'])
+         && request.resource.data.date is string
+         && request.resource.data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+         && id == request.resource.data.date
+         && request.resource.data.name is string
+         && request.resource.data.name.size() <= 80
+         && request.resource.data.yearly is bool;
        allow delete: if isAdmin();
      }
    }
@@ -174,6 +196,21 @@ h1{margin:0;font-size:22px;font-weight:700;letter-spacing:-.02em}
 .acts{display:flex;gap:8px;justify-content:flex-end}
 .acts .btn{padding:10px 18px}
 .toast{position:fixed;left:50%;bottom:96px;transform:translateX(-50%);background:var(--txt);color:var(--panel);padding:10px 18px;border-radius:24px;font-size:13px;font-weight:500;z-index:30;box-shadow:0 8px 24px rgba(0,0,0,.25)}
+/* Aviso rojo flotante: fuera del horario de atención del cliente. */
+.modal.red{background:rgba(70,6,6,.62)}
+.card.alert{background:#c62828;color:#fff;align-items:center;text-align:center;gap:14px;padding:28px 24px;box-shadow:0 24px 60px -16px rgba(120,0,0,.65)}
+.card.alert svg{width:44px;height:44px}
+.card.alert p{margin:0;font-size:17px;font-weight:600;line-height:1.45}
+.card.alert .btn{background:#fff;color:#c62828;min-width:150px}
+.card.alert .btn:focus-visible{outline:2px solid #fff;outline-offset:3px}
+/* Administrador: lista de feriados agregados. */
+.hlist{max-height:210px;overflow-y:auto;display:flex;flex-direction:column;gap:6px}
+.hrow{display:flex;align-items:center;gap:8px;background:var(--bg);border-radius:12px;padding:6px 6px 6px 12px;font-size:13px}
+.hrow span{flex:1;min-width:0;overflow-wrap:anywhere}
+.hrow small{color:var(--sub)}
+.hrow .ib{width:30px;height:30px;flex:none}
+.chk{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--sub);cursor:pointer}
+.chk input{width:16px;height:16px;accent-color:var(--acc)}
 @media(max-width:700px){
 .side{width:100%;border:0}.main{display:none}
 #app.open .side{display:none}#app.open .main{display:flex}
@@ -193,7 +230,7 @@ const FIREBASE_CONFIG = {apiKey: "AIzaSyA6NpWwPJSD5bn-_LXo3tGVXzYM4vSPALw",
   messagingSenderId: "464104957132",
   appId: "1:464104957132:web:c62bc672dd125da5dace69"};
 // Nombres de las colecciones de Firestore (si los cambias, cámbialos también en las reglas)
-const COL = { staff: 'staff', contacts: 'contacts', messages: 'messages' };
+const COL = { staff: 'staff', contacts: 'contacts', messages: 'messages', holidays: 'holidays' };
 const CONFIGURED = !/PEGA_AQUI/.test(JSON.stringify(FIREBASE_CONFIG));
 
 /* Mensajes automáticos del chat del cliente (no se guardan en Firestore: solo se muestran).
@@ -206,6 +243,7 @@ const AUTO = {
     + '\nTu nombre y apellido, DNI'
     + '\nCon estos datos podremos brindarte la información de tu causa.'
     + '\nEste chat permite consultas, pero no se reciben ni envían documentación, tampoco se notifica de resoluciones del Juzgado.'
+    + '\nNo recibimos audios, videos, ni llamadas por este medio.'
     + '\nPara notificarte alguna resolución del Juzgado en tu expediente debes concurrir a nuestra defensoría, de lunes a viernes de 7 a 11 hs.'
     + '\nSábados, Domingos y Feriados nuestra oficina no atiende.',
   welcomeHtml: 'Bienvenido a nuestro chat. En breve un agente judicial de nuestra Defensoría atenderá tu consulta.'
@@ -214,11 +252,91 @@ const AUTO = {
     + '<br>Tu nombre y apellido, DNI'
     + '<br>Con estos datos podremos brindarte la información de tu causa.</span>'
     + '<span class="warn">Este chat permite consultas, pero no se reciben ni envían documentación, tampoco se notifica de resoluciones del Juzgado.'
+    + '<br>No recibimos audios, videos, ni llamadas por este medio.'
     + '<br>Para notificarte alguna resolución del Juzgado en tu expediente debes concurrir a nuestra defensoría, de lunes a viernes de 7 a 11 hs.'
     + '<br>Sábados, Domingos y Feriados nuestra oficina no atiende.</span>',
   delay: 'Disculpe la demora, nuestros agentes se encuentran ocupados. En breve te responderemos.'
 };
 const DELAY_MS = 5 * 60 * 1000; // 5 minutos
+
+/* ============ HORARIO DE ATENCIÓN DEL CLIENTE ============
+   El cliente solo puede ingresar y escribir de lunes a viernes, de 7:00 a 10:59 (hora de Argentina),
+   salvo feriados. Fuera de ese horario se muestra un aviso rojo. El personal no tiene restricción.
+   Aviso: la hora sale del reloj del dispositivo (convertida a hora de Argentina). */
+const TZ = 'America/Argentina/Buenos_Aires', OPEN_H = 7, CLOSE_H = 11;
+const CLOSED_MSG = 'Disculpa, intenta comunicarte el próximo día hábil';
+
+/* Feriados que se repiten todos los años (MM-DD): nacionales inamovibles, Ley 27.399. */
+const HOL_YEARLY = {
+  '01-01': 'Año Nuevo',
+  '03-24': 'Día Nacional de la Memoria por la Verdad y la Justicia',
+  '04-02': 'Día del Veterano y de los Caídos en la Guerra de Malvinas',
+  '05-01': 'Día del Trabajador',
+  '05-25': 'Día de la Revolución de Mayo',
+  '06-20': 'Paso a la Inmortalidad del General Manuel Belgrano',
+  '07-09': 'Día de la Independencia',
+  '12-08': 'Inmaculada Concepción de María',
+  '12-25': 'Navidad'
+};
+/* Feriados de fecha puntual (AAAA-MM-DD): los que cambian cada año (Carnaval, Semana Santa,
+   trasladables, días puente) y el asueto provincial de Misiones (Natalicio de Andresito, 30/11).
+   Los puentes de 2027 aún no fueron decretados y el asueto de Misiones de 2027 depende de un
+   decreto provincial: agrégalos desde el botón de calendario (administrador) o en esta lista. */
+const HOL_DATES = {
+  // 2026
+  '2026-02-16': 'Carnaval', '2026-02-17': 'Carnaval',
+  '2026-03-23': 'Día no laborable con fines turísticos',
+  '2026-04-03': 'Viernes Santo',
+  '2026-06-15': 'Paso a la Inmortalidad del General Güemes (trasladado)',
+  '2026-07-10': 'Día no laborable con fines turísticos',
+  '2026-08-17': 'Paso a la Inmortalidad del General San Martín',
+  '2026-10-12': 'Día del Respeto a la Diversidad Cultural',
+  '2026-11-23': 'Día de la Soberanía Nacional (trasladado)',
+  '2026-12-07': 'Día no laborable con fines turísticos',
+  // 2027
+  '2027-02-08': 'Carnaval', '2027-02-09': 'Carnaval',
+  '2027-03-25': 'Jueves Santo', '2027-03-26': 'Viernes Santo',
+  '2027-06-21': 'Paso a la Inmortalidad del General Güemes (trasladado)',
+  '2027-08-16': 'Paso a la Inmortalidad del General San Martín (trasladado)',
+  '2027-10-11': 'Día del Respeto a la Diversidad Cultural (trasladado)'
+};
+let extraHol = [], holAt = 0;   // feriados agregados por el administrador (Firestore) y cuándo se leyeron
+
+/* Fecha, día de la semana y hora actuales en Argentina. */
+function arParts(t) {
+  const o = {};
+  new Intl.DateTimeFormat('en-US', { timeZone: TZ, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit' })
+    .formatToParts(t || new Date()).forEach(p => { o[p.type] = p.value; });
+  return { date: o.year + '-' + o.month + '-' + o.day, md: o.month + '-' + o.day, h: +o.hour % 24,
+           wd: new Date(Date.UTC(+o.year, +o.month - 1, +o.day)).getUTCDay() };
+}
+const isHoliday = p => !!(HOL_DATES[p.date] || HOL_YEARLY[p.md]
+  || extraHol.some(h => h.date === p.date || (h.yearly && String(h.date).slice(5) === p.md)));
+/* true solo en día hábil (lunes a viernes, no feriado) y de 7:00 a 10:59. */
+const clientOpen = t => { const p = arParts(t); return p.wd >= 1 && p.wd <= 5 && !isHoliday(p) && p.h >= OPEN_H && p.h < CLOSE_H; };
+/* Lee los feriados del administrador (se guarda 10 min). Si falla, quedan los feriados incluidos en el código. */
+async function loadHolidays(force) {
+  if (!force && holAt && Date.now() - holAt < 10 * 60 * 1000) return;
+  try {
+    extraHol = await Promise.race([S.listHolidays(), new Promise((_, no) => setTimeout(() => no(new Error('timeout')), 4000))]);
+    holAt = Date.now();
+  } catch (e) { console.warn('No se pudieron leer los feriados agregados:', e); }
+}
+const clientAllowed = async () => { await loadHolidays(); return clientOpen(); };
+const ALERT_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 7v6M12 17h.01"/></svg>';
+/* Modal flotante rojo. */
+function showClosed() {
+  if (document.querySelector('.modal.red')) return;
+  const m = document.createElement('div'); m.className = 'modal red';
+  m.setAttribute('role', 'alertdialog'); m.setAttribute('aria-modal', 'true'); m.setAttribute('aria-label', CLOSED_MSG);
+  m.innerHTML = `<div class="card alert">${ALERT_SVG}<p>${CLOSED_MSG}</p><button class="btn" id="cx">Entendido</button></div>`;
+  const onKey = e => { if (e.key === 'Escape') close(); };
+  const close = () => { m.remove(); document.removeEventListener('keydown', onKey); };
+  document.addEventListener('keydown', onKey);
+  m.onclick = e => { if (e.target === m) close(); };
+  document.body.appendChild(m);
+  const b = m.querySelector('#cx'); b.onclick = close; b.focus();
+}
 
 /* ================= FIREBASE (Auth + Firestore) ================= */
 const V = '10.14.1', G = `https://www.gstatic.com/firebasejs/${V}/`;
@@ -268,7 +386,11 @@ async function createFirebase(cfg) {
     watchMsgs: (cid, cb, er) => F.onSnapshot(
       cid ? F.query(F.collection(db, COL.messages), F.where('cid', '==', cid)) : F.collection(db, COL.messages),
       s => cb(s.docs.map(d => d.data())), er),
-    addMsg: m => F.addDoc(F.collection(db, COL.messages), m)
+    addMsg: m => F.addDoc(F.collection(db, COL.messages), m),
+    // Feriados agregados por el administrador.
+    listHolidays: async () => (await F.getDocs(F.collection(db, COL.holidays))).docs.map(d => ({ id: d.id, ...d.data() })),
+    setHoliday: (id, d) => F.setDoc(F.doc(db, COL.holidays, id), d),
+    deleteHoliday: id => F.deleteDoc(F.doc(db, COL.holidays, id))
   };
 }
 
@@ -284,7 +406,8 @@ const dayLbl = t => { const d = new Date(t), n = new Date(); if (d.toDateString(
 const ic = d => `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
 const I = { add: ic('<path d="M12 5v14M5 12h14"/>'), edit: ic('<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>'),
   del: ic('<path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/>'), out: ic('<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>'),
-  back: ic('<path d="M19 12H5M12 19l-7-7 7-7"/>'), send: ic('<path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"/>') };
+  back: ic('<path d="M19 12H5M12 19l-7-7 7-7"/>'), send: ic('<path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"/>'),
+  cal: ic('<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>') };
 const TK = '<svg class="tk" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12.5l4.5 4.5L15 7.5M10 15.5l1.5 1.5L21 7.5"/></svg>';
 /* Ícono estilo WhatsApp (burbuja de chat con teléfono) que reemplaza a la balanza en los logos. */
 const WA = '<svg width="44" height="44" viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="23" r="19.5" style="fill:var(--acc)"/><path d="M7 43.5 9.5 29.5 20.5 39.5Z" style="fill:var(--acc);stroke:var(--acc)" stroke-width="3" stroke-linejoin="round"/><path transform="translate(14 13) scale(.8)" style="fill:var(--onacc)" d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>';
@@ -321,11 +444,12 @@ const errMsg = e => { const c = (e && e.code) || '';
   return (e && e.message) || 'Ocurrió un error.'; };
 
 let S, unsubs = [], contacts = {}, msgs = [], active = null, me = null, phone = null, admin = false;
-let autoMsgs = [], autoTimer = null, welcomed = false;
+let autoMsgs = [], autoTimer = null, welcomed = false, seen = new Set(), openTimer = null;
 const stop = () => {
   unsubs.forEach(f => f()); unsubs = []; msgs = []; contacts = {}; active = null;
-  autoMsgs = []; welcomed = false;
+  autoMsgs = []; welcomed = false; seen = new Set();
   if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; }
+  if (openTimer) { clearInterval(openTimer); openTimer = null; }
 };
 function toast(t) { const e = document.createElement('div'); e.className = 'toast'; e.textContent = t; document.body.appendChild(e); setTimeout(() => e.remove(), 2500); }
 async function logout() { stop(); me = null; try { await S.signOut(); } catch (e) {} showRole(); }
@@ -337,8 +461,15 @@ function showRole() {
   <p class="sub"><strong>MINISTERIO PÚBLICO DE MISIONES</strong></p>
   <p class="sub">Av. Santa Catalina 1735, 1° piso – Posadas, Misiones</p>
   <p class="sub">Mensajería entre la Defensoría y las personas asistidas</p>
-  <button class="btn" id="rc">Soy cliente</button><button class="btn alt" id="re">Soy de la Defensoría</button></div>`;
-  $('#rc').onclick = () => showLogin(); $('#re').onclick = () => showStaffLogin();
+  <button class="btn" id="rc">Soy cliente</button><button class="btn alt" id="re">Soy de la Defensoría</button>
+  <p class="sub">Teléfono Fijo: 376-4446700 interno 1188<br>Lunes a Viernes de 7 a 11 h.</p></div>`;
+  // El cliente solo puede ingresar en día hábil y de 7 a 11 h; si no, se muestra el aviso rojo.
+  $('#rc').onclick = async () => {
+    const b = $('#rc'); b.disabled = true;
+    try { if (await clientAllowed()) showLogin(); else showClosed(); }
+    finally { b.disabled = false; }
+  };
+  $('#re').onclick = () => showStaffLogin();
 }
 
 /* ---------- Acceso del personal ---------- */
@@ -365,6 +496,7 @@ function showLogin(err, ok) {
   $('#bk').onclick = showRole;
   arPhone($('#ph'));
   $('#go').onclick = async () => {
+    if (!(await clientAllowed())) return showClosed();   // pasó el horario mientras escribía el número
     const p = clean($('#ph').value);
     const er = $('#er'); er.className = 'err'; er.textContent = '';
     if (p.length !== 13) { er.textContent = 'Ingresa la característica y el número (10 dígitos), sin 0 ni 15.'; return; }
@@ -409,6 +541,9 @@ function enterClient(p, c) {
   $('#out').onclick = logout; wireComposer();
   // Programa el aviso automático por demora de 5 minutos sin respuesta.
   scheduleDelay();
+  // Cada 30 s se revisa si el horario se abrió o se cerró: al abrirse, el cliente recibe lo que quedó retenido.
+  let was = clientOpen();
+  openTimer = setInterval(() => { loadHolidays(); const o = clientOpen(); if (o !== was) { was = o; renderMsgs(); } }, 30000);
   unsubs.push(S.watchMsgs(p, l => {
     msgs = l;
     // Mensaje automático de bienvenida: solo si la conversación está vacía.
@@ -438,10 +573,11 @@ function scheduleDelay() {
 /* ---------- Personal ---------- */
 function enterStaff(adm) {
   stop(); me = 'staff'; admin = !!adm; $('#app').className = '';
-  $('#app').innerHTML = `<div class="side"><div class="bar"><div><div class="t">Defensoría Oficial Civil 6</div><div class="s">${admin ? 'Administrador' : 'Empleado'}</div></div><div class="tools"><button class="ib pri" id="add" title="Nuevo contacto" aria-label="Nuevo contacto">${I.add}</button><button class="ib" id="out" title="Salir" aria-label="Salir">${I.out}</button></div></div>
+  $('#app').innerHTML = `<div class="side"><div class="bar"><div><div class="t">Defensoría Oficial Civil 6</div><div class="s">${admin ? 'Administrador' : 'Empleado'}</div></div><div class="tools">${admin ? `<button class="ib" id="hol" title="Feriados" aria-label="Feriados">${I.cal}</button>` : ''}<button class="ib pri" id="add" title="Nuevo contacto" aria-label="Nuevo contacto">${I.add}</button><button class="ib" id="out" title="Salir" aria-label="Salir">${I.out}</button></div></div>
   <div class="search"><input class="field" id="q" placeholder="Buscar o empezar un chat"></div><div id="list"></div></div>
   <div class="main" id="main"><div class="ph"><div class="logo">${WA}</div><p>Selecciona un chat para ver la conversación</p></div></div>`;
   $('#out').onclick = logout; $('#add').onclick = addContact; $('#q').oninput = renderSide;
+  if (admin) $('#hol').onclick = holidaysModal;
   $('#list').onclick = e => { const r = e.target.closest('.row'); if (r) openChat(r.dataset.id); };
   unsubs.push(S.watchContacts(l => { contacts = {}; l.forEach(c => contacts[c.id] = c); renderSide(); if (active && !contacts[active]) closeChat(); }, () => toast('Error de conexión')));
   unsubs.push(S.watchMsgs(null, l => { msgs = l; renderSide(); renderMsgs(); }, () => toast('Error de conexión')));
@@ -505,6 +641,48 @@ async function delContact(id) {
   catch (e) { toast(errMsg(e)); }
 }
 
+/* ---------- Administrador: feriados ---------- */
+const fmtD = d => String(d).split('-').reverse().join('/');
+async function holidaysModal() {
+  if (!admin) return;
+  const m = document.createElement('div'); m.className = 'modal';
+  m.innerHTML = `<div class="card"><h2>Feriados</h2>
+  <p class="sub">Los feriados nacionales y el provincial de Misiones ya vienen cargados. Agrega aquí los que falten (días puente, asuetos, cambios por decreto). En esas fechas los clientes no pueden ingresar ni escribir.</p>
+  <div class="hlist" id="hl"></div>
+  <input class="field" id="hd" type="date" aria-label="Fecha del feriado">
+  <input class="field" id="hn" maxlength="80" placeholder="Descripción (ej.: Día puente)" autocomplete="off">
+  <label class="chk"><input type="checkbox" id="hy"> Se repite todos los años</label>
+  <p class="err" id="he"></p>
+  <div class="acts"><button class="btn alt" id="hc">Cerrar</button><button class="btn" id="ha">Agregar</button></div></div>`;
+  document.body.appendChild(m);
+  const draw = () => {
+    const el = $('#hl'); if (!el) return;
+    const l = extraHol.slice().sort((a, b) => a.date < b.date ? -1 : 1);
+    el.innerHTML = l.map(h => `<div class="hrow"><span><b>${esc(fmtD(h.date))}</b> ${esc(h.name)}${h.yearly ? ' <small>(todos los años)</small>' : ''}</span><button class="ib dng" data-id="${esc(h.id)}" title="Quitar" aria-label="Quitar feriado">${I.del}</button></div>`).join('')
+      || '<div class="empty" style="padding:10px">Todavía no agregaste feriados propios.</div>';
+  };
+  draw(); loadHolidays(true).then(draw);
+  $('#hc').onclick = () => m.remove();
+  $('#hl').onclick = async e => {
+    const b = e.target.closest('button[data-id]'); if (!b) return;
+    try { await S.deleteHoliday(b.dataset.id); extraHol = extraHol.filter(h => h.id !== b.dataset.id); draw(); toast('Feriado quitado'); }
+    catch (er) { $('#he').textContent = errMsg(er); }
+  };
+  $('#ha').onclick = async () => {
+    const date = $('#hd').value, name = $('#hn').value.trim().slice(0, 80), yearly = $('#hy').checked, er = $('#he');
+    er.textContent = '';
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return er.textContent = 'Elige la fecha del feriado.';
+    if (!name) return er.textContent = 'Escribe una descripción.';
+    try {
+      const d = { date, name, yearly, createdAt: Date.now() };
+      await S.setHoliday(date, d);
+      extraHol = extraHol.filter(h => h.id !== date).concat([{ id: date, ...d }]);
+      $('#hd').value = ''; $('#hn').value = ''; $('#hy').checked = false;
+      draw(); toast('Feriado agregado');
+    } catch (e) { er.textContent = errMsg(e); }
+  };
+}
+
 /* ---------- Chat común ---------- */
 const composer = () => `<div class="comp"><input id="inp" placeholder="Escribe un mensaje" autocomplete="off" maxlength="2000"><button class="send" id="send" title="Enviar" aria-label="Enviar">${I.send}</button></div>`;
 function wireComposer() { $('#send').onclick = send; $('#inp').onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }; }
@@ -512,7 +690,18 @@ const curCid = () => me === 'staff' ? active : phone;
 function renderMsgs() {
   const el = $('#msgs'), cid = curCid(); if (!el || !cid) return;
   // Se combinan los mensajes reales con los mensajes automáticos del cliente.
-  const list = msgs.filter(m => m.cid === cid).concat(autoMsgs.filter(a => a.cid === cid)).sort((a, b) => a.ts - b.ts);
+  let list = msgs.filter(m => m.cid === cid).concat(autoMsgs.filter(a => a.cid === cid)).sort((a, b) => a.ts - b.ts);
+  // Cliente: los mensajes de la Defensoría solo se reciben en día y horario habilitados. Los que llegan fuera
+  // de horario se retienen y aparecen cuando el horario se abre; los ya recibidos no se ocultan.
+  if (me === 'client') {
+    const open = clientOpen();
+    list = list.filter(m => {
+      if (m.from !== 'staff' || m.auto || m.delay) return true;
+      const k = m.ts + '|' + m.text;
+      if (open) { seen.add(k); return true; }
+      return seen.has(k);
+    });
+  }
   const near = el.scrollHeight - el.scrollTop - el.clientHeight < 80, mine = me === 'staff' ? 'staff' : 'client';
   let h = '', last = '';
   list.forEach(m => { const d = dayLbl(m.ts); if (d !== last) { h += `<div class="day"><span>${d}</span></div>`; last = d; }
@@ -527,7 +716,10 @@ function renderMsgs() {
   if (me === 'staff' && list.length) { const lr = ls.get('lr') || {}, mx = list[list.length - 1].ts; if ((lr[cid] || 0) < mx) { lr[cid] = mx; ls.set('lr', lr); renderSide(); } }
 }
 async function send() {
-  const i = $('#inp'), t = i.value.trim(), cid = curCid(); if (!t || !cid) return; i.value = '';
+  const i = $('#inp'), t = i.value.trim(), cid = curCid(); if (!t || !cid) return;
+  // El cliente solo puede escribir en día hábil y de 7 a 11 h (hora de Argentina). El personal no tiene restricción.
+  if (me === 'client') { loadHolidays(); if (!clientOpen()) { showClosed(); return; } }
+  i.value = '';
   try {
     await S.addMsg({ cid, from: me === 'staff' ? 'staff' : 'client', text: t.slice(0, 2000), ts: Date.now() });
     // Cada mensaje nuevo del cliente reinicia la cuenta de 5 minutos sin respuesta.
@@ -545,6 +737,7 @@ async function send() {
   const s = await S.session().catch(() => null);
   if (s && s.role === 'staff') enterStaff(s.admin);
   else if (s && s.role === 'client') {
+    if (!(await clientAllowed())) { S.signOut().catch(() => {}); showClosed(); return; }
     let f = null;
     try { f = await findContact(s.phone); } catch (e) {}
     f ? enterClient(f.id, f.c) : S.signOut().catch(() => {});
