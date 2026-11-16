@@ -42,6 +42,11 @@
     El personal (modo Defensoría) está siempre disponible y puede escribir a cualquier hora.
     El cliente solo RECIBE mensajes de la Defensoría dentro del horario habilitado: los que se
     envían fuera de horario quedan retenidos y los ve al ingresar en el próximo horario habilitado.
+ 8. Historial: el chat del cliente carga solo los últimos 50 mensajes y ofrece "Cargar mensajes
+    anteriores". Esa consulta (cid + orden por ts descendente) necesita un índice compuesto:
+    Firestore Database → Índices → Compuesto → colección messages, campos cid (asc) y ts (desc).
+    Si el índice no existe la app sigue funcionando: lee el historial completo y en la consola
+    del navegador aparece el enlace para crearlo.
 
  REGLAS DE FIRESTORE
  rules_version = '2';
@@ -211,6 +216,18 @@ h1{margin:0;font-size:22px;font-weight:700;letter-spacing:-.02em}
 .hrow .ib{width:30px;height:30px;flex:none}
 .chk{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--sub);cursor:pointer}
 .chk input{width:16px;height:16px;accent-color:var(--acc)}
+/* Banner de estado de red: aviso sutil arriba cuando se pierde internet. */
+.netbar{position:fixed;top:0;left:0;right:0;z-index:40;height:calc(34px + env(safe-area-inset-top,0px));padding:env(safe-area-inset-top,0px) 12px 0;line-height:34px;text-align:center;font-size:12.5px;font-weight:600;background:#fff1cc;color:#6b4300;border-bottom:1px solid #f1d78d;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.netbar[hidden]{display:none}
+.netbar.ok{background:#dcf5e7;color:#0b5a3e;border-color:#b5e5cc}
+html.net-on #app{height:calc(100% - 34px);margin-top:34px}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]) .netbar{background:#3a2c0b;color:#ffd98a;border-color:#5a4416}
+:root:not([data-theme="light"]) .netbar.ok{background:#0f3a2a;color:#9ff0c9;border-color:#17503a}}
+:root[data-theme="dark"] .netbar{background:#3a2c0b;color:#ffd98a;border-color:#5a4416}
+:root[data-theme="dark"] .netbar.ok{background:#0f3a2a;color:#9ff0c9;border-color:#17503a}
+/* Botón para cargar mensajes anteriores (historial paginado). */
+.older{align-self:center;margin:4px 0 6px;min-height:44px;padding:0 18px;background:var(--panel);color:var(--acc2);border:1.5px solid var(--line);border-radius:22px;font-size:12.5px;font-weight:600;cursor:pointer;box-shadow:var(--sh)}
+.older:hover{background:var(--hov)}
 @media(max-width:700px){
 .side{width:100%;border:0}.main{display:none}
 #app.open .side{display:none}#app.open .main{display:flex}
@@ -219,6 +236,7 @@ h1{margin:0;font-size:22px;font-weight:700;letter-spacing:-.02em}
 </style>
 </head>
 <body>
+<div id="net" class="netbar" role="status" aria-live="polite" hidden></div>
 <div id="app"></div>
 <script type="module">
 /* ============ CONFIGURACIÓN (completa esto) ============
@@ -383,9 +401,17 @@ async function createFirebase(cfg) {
     },
     watchContacts: (cb, er) => F.onSnapshot(F.collection(db, COL.contacts),
       s => cb(s.docs.map(d => ({ id: d.id, ...d.data() }))), er),
-    watchMsgs: (cid, cb, er) => F.onSnapshot(
-      cid ? F.query(F.collection(db, COL.messages), F.where('cid', '==', cid)) : F.collection(db, COL.messages),
-      s => cb(s.docs.map(d => d.data())), er),
+    // lim (solo clientes): trae únicamente los últimos `lim` mensajes (ts descendente). Requiere el índice
+    // compuesto cid + ts; si no existe, vuelve a la consulta completa para que el chat siga funcionando.
+    watchMsgs: (cid, cb, er, lim) => {
+      const col = F.collection(db, COL.messages);
+      const plain = () => F.onSnapshot(cid ? F.query(col, F.where('cid', '==', cid)) : col, s => cb(s.docs.map(d => d.data())), er);
+      if (!cid || !lim) return plain();
+      let off = F.onSnapshot(F.query(col, F.where('cid', '==', cid), F.orderBy('ts', 'desc'), F.limit(lim)),
+        s => cb(s.docs.map(d => d.data())),
+        e => { if (e && e.code === 'failed-precondition') { console.warn('Falta el índice compuesto messages (cid, ts desc):', e.message); off = plain(); } else if (er) er(e); });
+      return () => off();
+    },
     addMsg: m => F.addDoc(F.collection(db, COL.messages), m),
     // Feriados agregados por el administrador.
     listHolidays: async () => (await F.getDocs(F.collection(db, COL.holidays))).docs.map(d => ({ id: d.id, ...d.data() })),
@@ -427,6 +453,17 @@ function arPhone(inp) {
     if (inp.value !== v) inp.value = v;
   };
   inp.addEventListener('input', fix);
+  // Pegado (WhatsApp u otras fuentes): se descarta todo lo que no sea dígito (espacios raros, guiones,
+  // paréntesis, caracteres invisibles) y se inserta el resultado ya limpio. Un número completo reemplaza al actual.
+  inp.addEventListener('paste', e => {
+    const cd = e.clipboardData || window.clipboardData; if (!cd) return;
+    e.preventDefault();
+    const d = clean(String(cd.getData('text') || '').normalize('NFKC')); if (!d) return;
+    const cur = inp.value.slice(P.length), a = Math.max(inp.selectionStart, P.length) - P.length, b = Math.max(inp.selectionEnd, P.length) - P.length;
+    inp.value = P + (d.length >= 10 ? d : cur.slice(0, a) + d + cur.slice(b));
+    fix();
+    inp.setSelectionRange(inp.value.length, inp.value.length);
+  });
   const end = () => { if (inp.selectionStart === inp.selectionEnd && inp.selectionStart < P.length) inp.setSelectionRange(inp.value.length, inp.value.length); };
   inp.addEventListener('focus', () => { end(); setTimeout(end); });
   inp.addEventListener('click', end);
@@ -445,14 +482,30 @@ const errMsg = e => { const c = (e && e.code) || '';
 
 let S, unsubs = [], contacts = {}, msgs = [], active = null, me = null, phone = null, admin = false;
 let autoMsgs = [], autoTimer = null, welcomed = false, seen = new Set(), openTimer = null;
+const PAGE = 50;                       // mensajes que se muestran por tramo en cada conversación
+let pageN = PAGE, resubMsgs = null;    // tramo actual y función que amplía el límite en Firestore (cliente)
 const stop = () => {
   unsubs.forEach(f => f()); unsubs = []; msgs = []; contacts = {}; active = null;
-  autoMsgs = []; welcomed = false; seen = new Set();
+  autoMsgs = []; welcomed = false; seen = new Set(); pageN = PAGE; resubMsgs = null;
   if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; }
   if (openTimer) { clearInterval(openTimer); openTimer = null; }
 };
 function toast(t) { const e = document.createElement('div'); e.className = 'toast'; e.textContent = t; document.body.appendChild(e); setTimeout(() => e.remove(), 2500); }
 async function logout() { stop(); me = null; try { await S.signOut(); } catch (e) {} showRole(); }
+
+/* ---------- Estado de la conexión: banner superior ---------- */
+let netTimer = null;
+function netShow(off) {
+  const b = $('#net'); if (!b) return;
+  clearTimeout(netTimer);
+  b.className = 'netbar' + (off ? '' : ' ok');
+  b.textContent = off ? 'Sin conexión a internet. No se enviarán mensajes.' : 'Conexión restablecida.';
+  b.hidden = false; document.documentElement.classList.add('net-on');
+  if (!off) netTimer = setTimeout(() => { b.hidden = true; document.documentElement.classList.remove('net-on'); }, 2500);
+}
+window.addEventListener('offline', () => netShow(true));
+window.addEventListener('online', () => netShow(false));
+if (!navigator.onLine) netShow(true);
 
 /* ---------- Pantalla inicial ---------- */
 function showRole() {
@@ -544,7 +597,7 @@ function enterClient(p, c) {
   // Cada 30 s se revisa si el horario se abrió o se cerró: al abrirse, el cliente recibe lo que quedó retenido.
   let was = clientOpen();
   openTimer = setInterval(() => { loadHolidays(); const o = clientOpen(); if (o !== was) { was = o; renderMsgs(); } }, 30000);
-  unsubs.push(S.watchMsgs(p, l => {
+  const sub = () => S.watchMsgs(p, l => {
     msgs = l;
     // Mensaje automático de bienvenida: solo si la conversación está vacía.
     if (!welcomed) {
@@ -552,7 +605,10 @@ function enterClient(p, c) {
       if (!l.length) autoMsgs.push({ cid: p, from: 'staff', text: AUTO.welcome, ts: Date.now(), auto: true, welcome: true });
     }
     renderMsgs();
-  }, e => { console.error('Mensajes (cliente):', e); toast('No se pudieron cargar los mensajes.'); }));
+  }, e => { console.error('Mensajes (cliente):', e); toast('No se pudieron cargar los mensajes.'); }, pageN + 1);
+  // Se pide un mensaje de más para saber si hay anteriores; "Cargar mensajes anteriores" amplía el límite.
+  let off = sub(); unsubs.push(() => off());
+  resubMsgs = () => { const o = off; off = sub(); o(); };
 }
 /* Aviso automático si pasan 5 minutos sin respuesta del personal. */
 function scheduleDelay() {
@@ -595,7 +651,7 @@ function renderSide() {
     || '<div class="empty">Aún no hay contactos.<br>Usa ➕ para registrar a una persona asistida.</div>';
 }
 function openChat(id) {
-  active = id; const c = contacts[id] || {};
+  active = id; pageN = PAGE; const c = contacts[id] || {};
   $('#app').classList.add('open'); $('#main').className = 'main';
   $('#main').innerHTML = `<div class="bar"><button class="ib back" id="bk" aria-label="Volver">${I.back}</button>${av(c.name)}<div style="flex:1;min-width:0"><div class="t">${esc(c.name)}</div><div class="s">${showPhone(id)}</div>${c.employee ? `<div class="s asg">Empleado asignado: ${esc(c.employee)}</div>` : ''}</div>${admin ? `<button class="ib" id="ed" title="Editar contacto" aria-label="Editar contacto">${I.edit}</button><button class="ib dng" id="dl" title="Borrar contacto" aria-label="Borrar contacto">${I.del}</button>` : ''}</div><div id="msgs"></div>${composer()}`;
   $('#bk').onclick = () => { active = null; $('#app').classList.remove('open'); renderSide(); };
@@ -703,8 +759,11 @@ function renderMsgs() {
     });
   }
   const near = el.scrollHeight - el.scrollTop - el.clientHeight < 80, mine = me === 'staff' ? 'staff' : 'client';
-  let h = '', last = '';
-  list.forEach(m => { const d = dayLbl(m.ts); if (d !== last) { h += `<div class="day"><span>${d}</span></div>`; last = d; }
+  const prevH = el.scrollHeight, prevT = el.scrollTop;
+  // Solo se dibujan los últimos pageN mensajes; el resto se carga con el botón.
+  const shown = list.length > pageN ? list.slice(-pageN) : list, keys = shown.map(m => m.ts + '|' + m.from + '|' + m.text);
+  let h = list.length > pageN ? '<button type="button" class="older" id="older">Cargar mensajes anteriores</button>' : '', last = '';
+  shown.forEach(m => { const d = dayLbl(m.ts); if (d !== last) { h += `<div class="day"><span>${d}</span></div>`; last = d; }
     const o = m.from === mine;
     // Los mensajes de la Defensoría van en negrita azul; los del cliente, en texto normal.
     const who = m.from === 'staff' ? 'staffmsg' : 'clientmsg';
@@ -712,13 +771,18 @@ function renderMsgs() {
     const body = m.welcome ? AUTO.welcomeHtml : esc(m.text);
     h += `<div class="b ${o ? 'out' : 'in'} ${who}">${body}<span class="meta">${tm(m.ts)}${o ? TK : ''}</span></div>`; });
   el.innerHTML = h || '<div class="day"><span>Aún no hay mensajes</span></div>';
+  const ob = el.querySelector('#older'); if (ob) ob.onclick = loadOlder;
   if (near || el._c !== cid) { el.scrollTop = el.scrollHeight; el._c = cid; }
+  else if (el._k0 && keys.indexOf(el._k0) > 0) el.scrollTop = prevT + el.scrollHeight - prevH;   // al cargar anteriores no salta la vista
+  el._k0 = keys[0] || null;
   if (me === 'staff' && list.length) { const lr = ls.get('lr') || {}, mx = list[list.length - 1].ts; if ((lr[cid] || 0) < mx) { lr[cid] = mx; ls.set('lr', lr); renderSide(); } }
 }
+function loadOlder() { pageN += PAGE; if (me === 'client' && resubMsgs) resubMsgs(); renderMsgs(); }
 async function send() {
   const i = $('#inp'), t = i.value.trim(), cid = curCid(); if (!t || !cid) return;
   // El cliente solo puede escribir en día hábil y de 7 a 11 h (hora de Argentina). El personal no tiene restricción.
   if (me === 'client') { loadHolidays(); if (!clientOpen()) { showClosed(); return; } }
+  if (!navigator.onLine) { netShow(true); toast('Sin conexión. Tu mensaje no se envió.'); return; }
   i.value = '';
   try {
     await S.addMsg({ cid, from: me === 'staff' ? 'staff' : 'client', text: t.slice(0, 2000), ts: Date.now() });
